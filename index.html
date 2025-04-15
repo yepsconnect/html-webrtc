@@ -1,0 +1,193 @@
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC Video</title>
+    <style>
+      * {
+        background-color: black;
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      video {
+        height: 100vh;
+        width: 100vw;
+      }
+    </style>
+  </head>
+  <body>
+    <video
+      id="video"
+      autoplay=""
+      controls=""
+      playsinline=""
+      muted=""
+      host="republic.media.boxt.one"
+      camera-id="428"
+      token="null"
+    ></video>
+
+    <script>
+      // Функция для установки соединения через WebRTC
+      async function PeerConnection(media) {
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+
+        const localTracks = [];
+
+        if (/video|audio/.test(media)) {
+          const tracks = ["video", "audio"]
+            .filter((kind) => media.indexOf(kind) >= 0)
+            .map(
+              (kind) =>
+                pc.addTransceiver(kind, { direction: "recvonly" }).receiver
+                  .track
+            );
+          localTracks.push(...tracks);
+        }
+
+        const videoElement = document.getElementById("video");
+        if (videoElement) {
+          videoElement.srcObject = new MediaStream(localTracks);
+        }
+
+        return pc;
+      }
+
+      // Функция для подключения через WebSocket и установления WebRTC-соединения
+      async function connectGo2rtc(media) {
+        const videoElement = document.getElementById("video");
+        const STREAM_ID = videoElement.getAttribute("camera-id");
+        const HOST = videoElement.getAttribute("host");
+
+        if (!STREAM_ID || !HOST) {
+          console.error("Не указаны параметры STREAM_ID или HOST.");
+          return;
+        }
+
+        const pc = await PeerConnection(media);
+
+        const url = new URL(
+          `https://pie5ohfieLahngah:duucaiHai5queede@${HOST}/api/ws`
+        );
+        const params = new URLSearchParams(url.search);
+        params.set("src", `camera${STREAM_ID}`);
+        url.search = params.toString();
+
+        const ws = new WebSocket("ws" + url.toString().substring(4));
+
+        ws.addEventListener("open", () => {
+          pc.addEventListener("icecandidate", (ev) => {
+            if (!ev.candidate) return;
+            const msg = {
+              type: "webrtc/candidate",
+              value: ev.candidate.candidate,
+            };
+            ws.send(JSON.stringify(msg));
+          });
+
+          pc.createOffer()
+            .then((offer) => pc.setLocalDescription(offer))
+            .then(() => {
+              const msg = {
+                type: "webrtc/offer",
+                value: pc.localDescription.sdp,
+              };
+              ws.send(JSON.stringify(msg));
+            });
+        });
+
+        ws.addEventListener("message", (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === "webrtc/candidate") {
+            pc.addIceCandidate({ candidate: msg.value, sdpMid: "0" });
+          } else if (msg.type === "webrtc/answer") {
+            pc.setRemoteDescription({ type: "answer", sdp: msg.value });
+          }
+        });
+      }
+
+      async function connectRTSP2web() {
+        const instance = new RTCPeerConnection();
+        instance.ontrack = function (event) {
+          if (videoElement.srcObject !== event.streams[0]) {
+            videoElement.srcObject = event.streams[0];
+          }
+        };
+
+        const transceiverInitializer = { direction: "recvonly" };
+        instance.addTransceiver("audio", transceiverInitializer);
+        instance.addTransceiver("video", transceiverInitializer);
+
+        const offer = await instance.createOffer();
+        await instance.setLocalDescription(offer);
+
+        const videoElement = document.getElementById("video");
+        const STREAM_ID = videoElement.getAttribute("camera-id");
+        const HOST = videoElement.getAttribute("host");
+        const TOKEN = videoElement.getAttribute("token");
+
+        videoElement.setAttribute("camera-id", STREAM_ID);
+
+        const URL = `https://${HOST}/stream/camera${STREAM_ID}/channel/0/webrtc?uuid=camera${STREAM_ID}&channel=0`;
+        const formData = new FormData();
+        formData.append("data", btoa(offer.sdp));
+
+        var headers = new Headers({
+          Authorization: TOKEN,
+        });
+
+        const response = await fetch(URL, {
+          method: "POST",
+          body: formData,
+          headers,
+        });
+        const message = await response.text();
+
+        let answer = new RTCSessionDescription({
+          type: "answer",
+          sdp: atob(message),
+        });
+
+        await instance.setRemoteDescription(answer);
+      }
+
+      // В момент загрузки страницы, получаем параметры из URL
+      window.onload = function () {
+        const urlParams = new URLSearchParams(window.location.search);
+        const HOST = urlParams.get("dns");
+        const STREAM_ID = urlParams.get("id");
+        const TOKEN = urlParams.get("token");
+
+        if (HOST && STREAM_ID) {
+          const videoElement = document.getElementById("video");
+          if (videoElement) {
+            videoElement.setAttribute("host", HOST);
+            videoElement.setAttribute("camera-id", STREAM_ID);
+            videoElement.setAttribute("token", TOKEN);
+          }
+
+          connectRTSP2web();
+          // if(HOST.includes("rezident.media.boxt.one")
+          //   || HOST.includes("dominant.media.boxt.one")
+          //   || HOST.includes("frukt.media.boxt.one")) {
+          //     connectRTSP2web()
+          // } else {
+          //     connectGo2rtc('video+audio');
+          // }
+        }
+
+        // Попытка автозапуска видео
+        const videoElement = document.getElementById("video");
+        if (videoElement) {
+          videoElement.play().catch((err) => {
+            console.log("Ошибка автозапуска видео:", err);
+          });
+        }
+      };
+    </script>
+  </body>
+</html>
