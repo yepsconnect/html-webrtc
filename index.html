@@ -18,19 +18,7 @@
     </style>
   </head>
   <body>
-    <video
-      id="video"
-      autoplay=""
-      controls=""
-      playsinline=""
-      muted=""
-      host="republic.media.boxt.one"
-      camera-id="428"
-      token="null"
-    ></video>
-
     <script>
-      // Функция для установки соединения через WebRTC
       async function PeerConnection(media) {
         const pc = new RTCPeerConnection({
           iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -57,7 +45,6 @@
         return pc;
       }
 
-      // Функция для подключения через WebSocket и установления WebRTC-соединения
       async function connectGo2rtc(media) {
         const videoElement = document.getElementById("video");
         const STREAM_ID = videoElement.getAttribute("camera-id");
@@ -111,10 +98,23 @@
       }
 
       async function connectRTSP2web() {
+        const videoElement = document.getElementById("video");
         const instance = new RTCPeerConnection();
+
+        const played = { value: false };
+
         instance.ontrack = function (event) {
           if (videoElement.srcObject !== event.streams[0]) {
             videoElement.srcObject = event.streams[0];
+
+            videoElement.onloadedmetadata = () => {
+              if (!played.value) {
+                played.value = true;
+                videoElement.play().catch((err) => {
+                  console.log("Ошибка воспроизведения видео:", err);
+                });
+              }
+            };
           }
         };
 
@@ -125,29 +125,25 @@
         const offer = await instance.createOffer();
         await instance.setLocalDescription(offer);
 
-        const videoElement = document.getElementById("video");
         const STREAM_ID = videoElement.getAttribute("camera-id");
         const HOST = videoElement.getAttribute("host");
         const TOKEN = videoElement.getAttribute("token");
-
-        videoElement.setAttribute("camera-id", STREAM_ID);
 
         const URL = `https://${HOST}/stream/camera${STREAM_ID}/channel/0/webrtc?uuid=camera${STREAM_ID}&channel=0`;
         const formData = new FormData();
         formData.append("data", btoa(offer.sdp));
 
-        var headers = new Headers({
-          Authorization: TOKEN,
-        });
+        const headers = new Headers({ Authorization: TOKEN });
 
         const response = await fetch(URL, {
           method: "POST",
           body: formData,
           headers,
         });
+
         const message = await response.text();
 
-        let answer = new RTCSessionDescription({
+        const answer = new RTCSessionDescription({
           type: "answer",
           sdp: atob(message),
         });
@@ -155,7 +151,6 @@
         await instance.setRemoteDescription(answer);
       }
 
-      // В момент загрузки страницы, получаем параметры из URL
       window.onload = function () {
         const urlParams = new URLSearchParams(window.location.search);
         const HOST = urlParams.get("dns");
@@ -171,23 +166,18 @@
           }
 
           connectRTSP2web();
-          // if(HOST.includes("rezident.media.boxt.one")
-          //   || HOST.includes("dominant.media.boxt.one")
-          //   || HOST.includes("frukt.media.boxt.one")) {
-          //     connectRTSP2web()
-          // } else {
-          //     connectGo2rtc('video+audio');
-          // }
-        }
-
-        // Попытка автозапуска видео
-        const videoElement = document.getElementById("video");
-        if (videoElement) {
-          videoElement.play().catch((err) => {
-            console.log("Ошибка автозапуска видео:", err);
-          });
         }
       };
     </script>
+    <video
+      id="video"
+      autoplay=""
+      controls=""
+      playsinline=""
+      muted=""
+      host="republic.media.boxt.one"
+      camera-id="428"
+      token="null"
+    ></video>
   </body>
 </html>
